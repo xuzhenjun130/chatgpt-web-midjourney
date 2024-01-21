@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>登录跳转中</title>
+</head>
+<body>
+	登录跳转中...
+<script>
+// js设置cookie
+function setCookie(name, value, days) {
+	let date = new Date();
+	date.setDate(date.getDate() + days);
+	document.cookie = name + '=' + value + ';expires=' + date;
+}
+// 获取url参数
+function getQueryString(name) {
+	let reg = new RegExp('(^|&)' + name + '=([^&]*)(&|$)', 'i');
+	let r = window.location.search.substr(1).match(reg);
+	if (r != null) {
+		return unescape(r[2]);
+	}
+	return null;
+}
+// 获取token
+let token = getQueryString('token');
+setCookie('token', token, 7);
+// 跳转到首页
+window.location.href = '/';
+</script>
+</body>
+</html>
