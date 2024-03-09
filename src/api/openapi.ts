@@ -1,5 +1,5 @@
 
-import { gptConfigStore, gptServerStore, homeStore } from "@/store";
+import { gptConfigStore, gptServerStore, homeStore,useAuthStore } from "@/store";
 import { mlog,myTrim } from "./mjapi";
 import { fetchSSE } from "./sse/fetchsse";
 import axios from 'axios';
@@ -8,16 +8,20 @@ import { isNumber, isObject } from "@/utils/is";
 import { t } from "@/locales";
 import { ChatMessage } from "gpt-tokenizer/esm/GptEncoding";
 import { chatSetting } from "./chat";
+
 //import {encode,  encodeChat}  from "gpt-tokenizer"
 //import {encode,  encodeChat} from "gpt-tokenizer/cjs/encoding/cl100k_base.js";
 //import { get_encoding } from '@dqbd/tiktoken'
 //import FormData from 'form-data';
+
 
 export const KnowledgeCutOffDate: Record<string, string> = {
   default: "2021-09",
   "gpt-4-1106-preview": "2023-04",
   "gpt-4-0125-preview": "2023-04",
   "gpt-4-vision-preview": "2023-04",
+  "claude-3-opus-20240229": "2023-08",
+  "claude-3-sonnet-20240229": "2023-08",
 };
 
 const getUrl=(url:string)=>{
@@ -87,29 +91,74 @@ function uploadR2(file: File) {
 	});
 }
 
-export const GptUploader =   ( url:string, FormData:FormData )=>{
-	 if(homeStore.myData.session.isUploadR2){
-			const file = FormData.get('file') as File;
-			return uploadR2(file);
-	 }
+export const GptUploader =   ( _url :string, FormData:FormData )=>{
 
-    // if(gptServerStore.myData.OPENAI_API_BASE_URL){
-    //     return `${ gptServerStore.myData.OPENAI_API_BASE_URL}${url}`;
-    // }
-    url= gptServerStore.myData.UPLOADER_URL? gptServerStore.myData.UPLOADER_URL :  gptGetUrl( url );
+    //R2上传
+    const upLoaderR2= ()=>{
+        const file = FormData.get('file') as File;
+		return uploadR2(file);
+    }
+
+    //执行上传
+    const uploadNomalDo = (url:string, headers:any)=>{
+        return new Promise<any>((resolve, reject) => {
+                axios.post( url , FormData, {
+                headers
+            }).then(response =>  resolve(response.data )
+            ).catch(error =>reject(error)  );
+        })
+    }
+
+    //除R2外默认流程
+    const uploadNomal= (url:string)=>{ 
+        url= gptServerStore.myData.UPLOADER_URL? gptServerStore.myData.UPLOADER_URL :  gptGetUrl( url );
+        let headers=   {'Content-Type': 'multipart/form-data' } 
+        if(gptServerStore.myData.OPENAI_API_BASE_URL && url.indexOf(gptServerStore.myData.OPENAI_API_BASE_URL)>-1  ) {
+            headers={...headers,...getHeaderAuthorization()}
+            
+        }else{
+            const authStore = useAuthStore()
+            if( authStore.token ) {
+                const  header2={ 'x-ptoken':  authStore.token };
+                headers= {...headers, ...header2}
+            }
+        }
+        return  uploadNomalDo(url,headers );
+        
+    }
+
+    //处理上传流程 
+    const uploadType=   ( (homeStore.myData.session.uploadType??'') as string).toLocaleLowerCase() ;
     let headers=   {'Content-Type': 'multipart/form-data' }
-    //
+    //R2
+    if(uploadType=='r2' ){
+        return upLoaderR2(); 
+    //容器
+    }else if( uploadType=='container' ) { 
+         const authStore = useAuthStore()
+        if( authStore.token ) {
+            const  header2={ 'x-ptoken':  authStore.token };
+            headers= {...headers, ...header2}
+        }
+        let url= `/openapi${_url}`
+        return  uploadNomalDo(url,headers );
 
+    //前端API
+    }else if( uploadType=='api' ) { 
+        headers={...headers,...getHeaderAuthorization()}
+        let url= `${ gptServerStore.myData.OPENAI_API_BASE_URL}${_url}`
+        return  uploadNomalDo(url,headers );
+    
+    //自定义链接
+    }else if( uploadType=='myurl' ) { 
+        return  uploadNomalDo(_url,headers );
+    }
 
-
-    if(gptServerStore.myData.OPENAI_API_BASE_URL && url.indexOf(gptServerStore.myData.OPENAI_API_BASE_URL)>-1  ) headers={...headers,...getHeaderAuthorization()}
-    return new Promise<any>((resolve, reject) => {
-            axios.post( url , FormData, {
-            headers
-        }).then(response =>  resolve(response.data )
-        ).catch(error =>reject(error)  );
-    })
-
+    //默认上传流程
+    if(homeStore.myData.session.isUploadR2){
+    return upLoaderR2();
+    }
+    return uploadNomal( _url);
 }
 
 export const whisperUpload = ( FormData:FormData )=>{
@@ -158,6 +207,8 @@ interface subModelType{
 }
 function getHeaderAuthorization(){
     if(!gptServerStore.myData.OPENAI_API_KEY){
+        const authStore = useAuthStore()
+        if( authStore.token ) return { 'x-ptoken':  authStore.token };
         return {}
     }
     return {
@@ -174,7 +225,9 @@ export const getSystemMessage = (uuid?:number )=>{
     }
     if(  sysTem ) return sysTem;
     let model= gptConfigStore.myData.model?gptConfigStore.myData.model: "gpt-3.5-turbo";
-      const DEFAULT_SYSTEM_TEMPLATE = `You are ChatGPT, a large language model trained by OpenAI.
+    let producer= 'You are ChatGPT, a large language model trained by OpenAI.'
+    if(model.includes('claude-3')) producer=  'You are Claude, a large language model trained by Anthropic.';
+      const DEFAULT_SYSTEM_TEMPLATE = `${producer}
 Knowledge cutoff: ${KnowledgeCutOffDate[model]}
 Current model: ${model}
 Current time: ${ new Date().toLocaleString()}
@@ -280,7 +333,8 @@ export const subTTS = async (tts:ttsType )=>{
       throw new Error(`API request failed with status ${response.status}`);
     }
     const audioData = await response.arrayBuffer();
-    const blob = new Blob([audioData], { type: 'audio/mp3' });
+    const contentType = response.headers.get('Content-Type')
+    const blob = new Blob([audioData], { type: contentType??'audio/mpeg' });
     mlog('blob', blob);
     const saveID = await localSaveAny( blob );
     const pp= await bolbObj(blob );
@@ -399,7 +453,7 @@ const getModelMax=( model:string )=>{
     model= model.toLowerCase();
     if( model.indexOf('8k')>-1  ){
         return 8;
-    }else if( model.indexOf('16k')>-1 || model=='gpt-3.5-turbo-1106' ){
+    }else if( model.indexOf('16k')>-1 || model=='gpt-3.5-turbo-1106' || model=='gpt-3.5-turbo-0125' ){
         return 16;
     }else if( model.indexOf('32k')>-1  ){
         return 32;
@@ -412,6 +466,10 @@ const getModelMax=( model:string )=>{
         return 128; 
     }else if( model.indexOf('gpt-4')>-1  ){  
         max=8;
+    }else if( model.toLowerCase().includes('claude-3') ){
+        //options.maxModelTokens = 120*1024;
+        //options.maxResponseTokens = 4096
+        return 120;
     }
 
     return max;

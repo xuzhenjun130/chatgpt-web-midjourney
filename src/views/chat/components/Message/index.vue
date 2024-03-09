@@ -24,6 +24,7 @@ interface Props {
 interface Emit {
   (ev: 'regenerate'): void
   (ev: 'delete'): void
+  (ev: 'edit'): void
 }
 
 const props = defineProps<Props>()
@@ -54,6 +55,11 @@ const options = computed(() => {
       key: 'delete',
       icon: iconRender({ icon: 'ri:delete-bin-line' }),
     },
+    {
+      label: t('common.edit'),
+      key: 'edit',
+      icon: iconRender({ icon: 'ri:edit-2-line' }),
+    },
   ]
 
   if (!props.inversion) {
@@ -72,7 +78,7 @@ const options = computed(() => {
   return common
 })
 
-function handleSelect(key: 'copyText' | 'delete' | 'toggleRenderType' |'tts') {
+function handleSelect(key: 'copyText' | 'delete' | 'edit' | 'toggleRenderType' | 'tts') {
   switch (key) {
     case 'tts': 
       homeStore.setMyData({act:'gpt.ttsv2', actData:{ index:props.index , uuid:props.chat.uuid, text:props.text } });
@@ -85,6 +91,9 @@ function handleSelect(key: 'copyText' | 'delete' | 'toggleRenderType' |'tts') {
       return
     case 'delete':
       emit('delete')
+      return
+    case 'edit':
+      emit('edit')
   }
 }
 
@@ -130,7 +139,7 @@ function handleRegenerate2() {
       <AvatarComponent :image="inversion" :logo="chat.logo"/>
     </div>
     <div class="overflow-hidden text-sm " :class="[inversion ? 'items-end' : 'items-start']">
-      <p class="text-xs group  text-[#b4bbc4] flex justify-start items-center space-x-2 " :class="[inversion ? 'text-right' : 'text-left']">
+      <p class="text-xs group  text-[#b4bbc4] flex  items-center space-x-2 " :class="[inversion ? 'justify-end' : 'justify-start']">
         <span>{{ dateTime }}</span>
         <span v-if="chat.model"  class="text-[#b4bbc4]/50">{{ chat.model }}</span>
         <!-- <span>{{ chat.opt?.progress }}</span> -->
